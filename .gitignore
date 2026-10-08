@@ -1,0 +1,42 @@
+# Local settings and personal notes (see .env.example)
+.env
+esp8266_player/src/LocalConfig.h
+CLAUDE.md
+
+# Songs that may not be published (copyrighted); public demos go in songs/demos/
+songs/private/
+
+# Output of tools/monitor.ps1 and the test scripts (board logs can contain network details)
+logs/
+
+# Arduino / arduino-cli build output
+build/
+**/build/
+*.elf
+*.hex
+*.eep
+*.bin
+*.map
+.arduino15/
+
+# Editors
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*~
+
+# OS junk
+Thumbs.db
+ehthumbs.db
+desktop.ini
+.DS_Store
+$RECYCLE.BIN/
+
+# Temporary and backup files
+*.bak
+*.tmp
+*.orig
+
+# NOTE: esp8266_player/src/web/WebAssets.h and src/music/EmbeddedSongs.cpp are generated but
+# committed on purpose, so the firmware compiles without running tools/build_web.ps1.
