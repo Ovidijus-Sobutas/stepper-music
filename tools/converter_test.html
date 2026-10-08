@@ -1,0 +1,65 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Converter test</title>
+<style>body{font:14px system-ui,sans-serif;margin:16px}td,th{padding:4px 10px;border-bottom:1px solid #ddd;text-align:left}.ok{color:#16a34a}.bad{color:#dc2626}</style>
+</head><body>
+<h1>Converter test: JavaScript vs midi_to_stepper.py</h1>
+<p>Each song: the browser converts the .mid; the result is compared byte for byte with the .stepper
+file the Python script produced. Default options first; if they differ, the other options are tried.</p>
+<table id="t"><tr><th>Song</th><th>Result</th><th>Options</th><th>Notes</th><th>Bytes</th><th>Time</th><th>Details</th></tr></table>
+<pre id="log"></pre>
+<script src="../esp8266_player/web/converter.js"></script>
+<script>
+const songs = ['harry', 'hotel', 'howl', 'indila', 'pirates'];
+const tries = [{ mode: 'note' }, { mode: 'channel' }, { mode: 'pitch' }];
+window.results = [];
+function firstDiff(a, b) {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) if (a[i] !== b[i]) return i;
+  return a.length === b.length ? -1 : n;
+}
+function eventAt(bytes, i) {
+  const v = new DataView(bytes.buffer, bytes.byteOffset), o = 12 + 8 * i;
+  return o + 8 <= bytes.length ? [v.getUint32(o, true), v.getUint8(o + 4), v.getUint8(o + 5), v.getUint16(o + 6, true)] : null;
+}
+(async () => {
+  for (const name of songs) {
+    const row = document.getElementById('t').insertRow();
+    const res = { name };
+    try {
+      const mid = await (await fetch('/ref/' + name + '.mid')).arrayBuffer();
+      const ref = new Uint8Array(await (await fetch('/ref/' + name + '.stepper')).arrayBuffer());
+      const t0 = performance.now();
+      const midi = StepperConverter.parseMidi(mid);
+      let match = null, firstBytes = null, firstOpts = null;
+      for (const opts of tries) {
+        const out = StepperConverter.toStepperBytes(StepperConverter.convert(midi, opts).events);
+        if (!firstBytes) { firstBytes = out; firstOpts = opts; }
+        if (firstDiff(out, ref) === -1) { match = opts; firstBytes = out; break; }
+      }
+      const ms = performance.now() - t0;
+      res.match = !!match; res.options = match ? match.mode : 'none'; res.bytes = ref.length; res.ms = Math.round(ms);
+      let details = '';
+      if (!match) {
+        const d = firstDiff(firstBytes, ref), ev = Math.floor((d - 12) / 8);
+        details = `default differs at byte ${d} (event ${ev}): js=${JSON.stringify(eventAt(firstBytes, ev))} py=${JSON.stringify(eventAt(ref, ev))}; js ${firstBytes.length} B, py ${ref.length} B`;
+        res.details = details;
+      }
+      const sum = StepperConverter.summarize(StepperConverter.convert(midi, match || firstOpts));
+      res.notes = sum.notes;
+      // G3 options must not change the result when everything is selected and left at defaults.
+      const parts = StepperConverter.listParts(midi);
+      const all = new Set(parts.map(p => p.key));
+      const withKeep = StepperConverter.toStepperBytes(StepperConverter.convert(midi, { mode: 'note', keep: all, speed: 1, transpose: 0 }).events);
+      res.allPartsIdentical = firstDiff(withKeep, ref) === -1;
+      res.parts = parts.map(p => `${p.name} [ch${p.channel + 1}${p.drums ? ' drums' : ''}] ${p.notes} notes ${p.low}-${p.high}`);
+      res.stats = StepperConverter.convert(midi, { mode: 'note' }).stats;
+      row.innerHTML = `<td>${name}</td><td class="${match ? 'ok' : 'bad'}">${match ? 'IDENTICAL' : 'DIFFERENT'}</td><td>${res.options}</td><td>${sum.notes}</td><td>${ref.length}</td><td>${res.ms} ms</td><td>${details}</td>`;
+    } catch (e) {
+      res.error = String(e);
+      row.innerHTML = `<td>${name}</td><td class="bad">ERROR</td><td colspan="5">${e}</td>`;
+    }
+    window.results.push(res);
+  }
+  window.done = true;
+})();
+</script></body></html>

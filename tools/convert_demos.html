@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Convert demo songs</title>
+<style>
+  body { font: 15px system-ui, sans-serif; margin: 16px; background: #fff; color: #18181b; }
+  @media (prefers-color-scheme: dark) { body { background: #18181b; color: #fafafa; } }
+  td, th { padding: 4px 10px; text-align: left; }
+  .bad { color: #dc2626; }
+</style>
+</head>
+<body>
+<!-- Opened by tools\convert_demos.ps1, which also receives the results. Converts every
+     songs/demos/*.mid with the Convert card's default settings and saves <name>.stepper. -->
+<h1>Convert demo songs</h1>
+<p id="progress">Working…</p>
+<table>
+  <thead><tr><th>Song</th><th>Notes</th><th>Length</th><th>Notes at once</th><th>Cut short</th><th>Saved</th></tr></thead>
+  <tbody id="results"></tbody>
+</table>
+<script src="../esp8266_player/web/converter.js"></script>
+<script>
+// The Convert card's defaults: every part except drums, "Spread" assignment, no transpose,
+// no range folding, speed 100 %.
+function defaultOptions(midi) {
+  const keep = new Set(StepperConverter.listParts(midi).filter(part => !part.drums).map(part => part.key));
+  return { mode: 'note', keep, speed: 1, transpose: 0, low: null, high: null };
+}
+
+function addRow(cells, failed) {
+  const row = document.createElement('tr');
+  if (failed) row.className = 'bad';
+  cells.forEach(text => {
+    const cell = document.createElement('td');
+    cell.textContent = text;
+    row.appendChild(cell);
+  });
+  document.getElementById('results').appendChild(row);
+}
+
+async function convertOne(name) {
+  const midiBytes = await (await fetch('../songs/demos/' + encodeURIComponent(name) + '.mid')).arrayBuffer();
+  const midi = StepperConverter.parseMidi(midiBytes);
+  const conversion = StepperConverter.convert(midi, defaultOptions(midi));
+  const summary = StepperConverter.summarize(conversion);
+  const answer = await fetch('/save-stepper?name=' + encodeURIComponent(name), {
+    method: 'POST',
+    body: StepperConverter.toStepperBytes(conversion.events),
+  });
+  const seconds = Math.round(summary.lengthMs / 1000);
+  addRow([name, summary.notes, Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0'),
+          conversion.stats.maxAtOnce, conversion.stats.stolen, answer.ok ? 'yes' : 'NO'], !answer.ok);
+}
+
+(async function convertAll() {
+  const names = await (await fetch('/demo-midis')).json();
+  for (const name of names) {
+    try {
+      await convertOne(name);
+    } catch (error) {
+      addRow([name, '', '', '', '', 'error: ' + error.message], true);
+    }
+  }
+  document.getElementById('progress').textContent =
+    'Done: ' + names.length + ' songs. Stop the script (Ctrl+C), then run tools\\build_demos.ps1.';
+})();
+</script>
+</body>
+</html>
