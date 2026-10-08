@@ -24,7 +24,10 @@ $entries = @()
 foreach ($f in Get-ChildItem $web -File | Sort-Object Name) {
   $ext = $f.Extension.ToLower()
   if (-not $types.ContainsKey($ext)) { continue }
-  $raw = [IO.File]::ReadAllBytes($f.FullName)
+  # Line endings as in git (LF): a Windows checkout may have CRLF, and the packed page must come
+  # out the same everywhere, or WebAssets.h shows up as changed after every build.
+  $text = [IO.File]::ReadAllText($f.FullName, [Text.Encoding]::UTF8) -replace "`r`n", "`n"
+  $raw = (New-Object Text.UTF8Encoding($false)).GetBytes($text)
   $gz = Gzip $raw
   $id = "asset_" + ($f.Name -replace '[^A-Za-z0-9]', '_')
   [void]$sb.AppendLine("")

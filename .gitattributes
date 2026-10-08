@@ -1,0 +1,5 @@
+# Song files and pictures are binary: git must never change their line endings.
+*.mid binary
+*.midi binary
+*.stepper binary
+*.png binary
