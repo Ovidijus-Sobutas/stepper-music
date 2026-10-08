@@ -1,0 +1,241 @@
+<!doctype html>
+<!--
+  Music Player web page, served by the ESP8266 (packed into the firmware by tools/build_web.ps1).
+  Markup only: looks are in style.css, behaviour in app.js (player, songs, playlists, sound,
+  settings), convert.js (the "Convert MIDI" card) and converter.js (MIDI -> .stepper).
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Music Player</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <h1>&#9835; Music Player</h1>
+
+  <!-- Now playing, transport buttons, play queue -->
+  <section class="card">
+    <div class="muted" id="playerState">…</div>
+    <div id="songTitle"></div>
+    <div class="progress-bar"><div id="songProgress"></div></div>
+    <div class="row muted times"><span id="timeElapsed">0:00</span><span id="timeTotal">0:00</span></div>
+    <div class="button-row">
+      <button id="prevButton" class="ghost" title="Previous song" disabled>⏮</button>
+      <button id="pauseButton" class="ghost" disabled>Pause</button>
+      <button id="stopButton" class="danger">Stop</button>
+      <button id="nextButton" class="ghost" title="Next song" disabled>⏭</button>
+    </div>
+    <div class="muted" id="queueInfo"></div>
+    <div class="button-row">
+      <button id="playAllButton" class="ghost">Play all</button>
+      <button id="shuffleAllButton" class="ghost">Shuffle all</button>
+    </div>
+    <div class="two-columns">
+      <div>
+        <label for="repeatMode">Repeat</label>
+        <select id="repeatMode" data-choices="repeat"></select>
+      </div>
+      <div>
+        <label for="restBetweenSongs">Pause between songs</label>
+        <select id="restBetweenSongs" data-choices="restBetweenSongs"></select>
+      </div>
+    </div>
+  </section>
+
+  <!-- Sound style presets + fine-tune. data-sound-key = the setting's key in /api/sound. -->
+  <section class="card">
+    <h2>Sound style</h2>
+    <div class="style-grid" id="soundStyles"></div>
+    <div class="muted" id="soundStyleDescription"></div>
+    <details id="fineTune" class="big-gap-above">
+      <summary>Fine-tune</summary>
+      <div class="two-columns">
+        <div>
+          <label for="fineOctave">Octave (speed)</label>
+          <select id="fineOctave" data-sound-key="oct" data-choices="octave"></select>
+        </div>
+        <div>
+          <label for="fineGroup">Microsteps together</label>
+          <select id="fineGroup" data-sound-key="group" data-choices="microstepsTogether"></select>
+        </div>
+        <div>
+          <label for="fineRelease">Motor off when silent</label>
+          <select id="fineRelease" data-sound-key="release" data-choices="motorOffWhenSilent"></select>
+        </div>
+        <div>
+          <label for="fineMicrostep">Driver microstepping</label>
+          <select id="fineMicrostep" data-sound-key="micro" data-choices="driverMicrostepping"></select>
+        </div>
+      </div>
+      <div class="muted gap-above">Changes apply from the next note, also during a song. "Driver microstepping" must match the STEP_SIZE jumpers on the GT2560.</div>
+    </details>
+  </section>
+
+  <!-- Song library: search, list, upload -->
+  <section class="card">
+    <div class="row songs-header">
+      <h2>Songs</h2>
+      <input id="songSearch" type="search" placeholder="Search…" aria-label="Search songs" autocomplete="off">
+    </div>
+    <div id="songList" class="muted">Loading…</div>
+    <button class="ghost wide" id="showMoreSongsButton" hidden></button>
+    <div class="row muted gap-above">
+      <span id="storageUsed">…</span>
+      <a href="#" id="restoreDemosLink">Restore demo songs</a>
+    </div>
+    <label for="songFileInput">Add songs: MIDI (.mid) or .stepper</label>
+    <input type="file" id="songFileInput" accept=".mid,.midi,.stepper" multiple>
+    <div class="progress-bar" id="uploadBar" hidden><div id="uploadProgress"></div></div>
+  </section>
+
+  <!-- Playlists: list + editor -->
+  <section class="card">
+    <h2>Playlists</h2>
+    <div id="playlistList" class="muted">Loading…</div>
+    <button class="ghost gap-above" id="newPlaylistButton">New playlist</button>
+    <div id="playlistEditor" class="big-gap-above" hidden>
+      <label for="playlistName">Playlist name</label>
+      <input id="playlistName" maxlength="23">
+      <div id="playlistSongs" class="gap-above"></div>
+      <label for="playlistAddSong">Add a song</label>
+      <select id="playlistAddSong"></select>
+      <div class="button-row">
+        <button class="ghost" id="playlistAddAllButton">Add all songs</button>
+        <button class="ghost" id="playlistCancelButton">Cancel</button>
+        <button id="playlistSaveButton">Save</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Convert MIDI: shown by convert.js while a .mid file is being added -->
+  <section class="card" id="convertPanel" hidden>
+    <h2>Convert MIDI</h2>
+    <div class="muted" id="convertFileName"></div>
+    <label for="convertSongName">Song name</label>
+    <input id="convertSongName" maxlength="23">
+    <div class="row big-gap-above">
+      <b>Instruments</b>
+      <span class="muted"><a href="#" id="convertSelectAll">all</a> · <a href="#" id="convertSelectNone">none</a></span>
+    </div>
+    <div id="convertParts"></div>
+    <div class="two-columns">
+      <div>
+        <label for="convertMotorMode">Motor assignment</label>
+        <select id="convertMotorMode" data-choices="motorAssignment"></select>
+      </div>
+      <div>
+        <label for="convertRange">Keep notes in range</label>
+        <select id="convertRange" data-choices="noteRange"></select>
+      </div>
+      <div>
+        <label for="convertTranspose">Transpose</label>
+        <select id="convertTranspose" data-choices="transpose"></select>
+      </div>
+      <div>
+        <label for="convertSpeed">Speed <b id="convertSpeedValue">100%</b></label>
+        <input type="range" id="convertSpeed" min="50" max="200" step="5" value="100">
+      </div>
+    </div>
+    <canvas id="convertPianoRoll"></canvas>
+    <div class="muted" id="convertSummary"></div>
+    <div class="button-row">
+      <button id="convertListenButton" class="ghost">Listen</button>
+      <button id="convertCancelButton" class="ghost">Cancel</button>
+      <button id="convertAddButton">Add to player</button>
+    </div>
+  </section>
+
+  <!-- Motor test: data-motor = the "motor" parameter of /api/test -->
+  <section class="card">
+    <h2>Motor test</h2>
+    <div class="motor-grid">
+      <button class="ghost" data-motor="0">0 · X</button>
+      <button class="ghost" data-motor="1">1 · Y</button>
+      <button class="ghost" data-motor="2">2 · Z</button>
+      <button class="ghost" data-motor="3">3 · E0</button>
+      <button class="ghost" data-motor="4">4 · E1</button>
+      <button class="ghost" data-motor="all">All</button>
+    </div>
+  </section>
+
+  <!-- Settings: connection status, Wi-Fi networks, about, restart / factory reset -->
+  <section class="card">
+    <h2>Settings</h2>
+    <div class="row"><span>Wi-Fi</span><span id="wifiStatus">…</span></div>
+    <div class="row"><span>Address</span><span id="networkAddress">…</span></div>
+    <div class="row"><span>GT2560</span><span id="gt2560Status">…</span></div>
+
+    <details id="wifiSection" class="gap-above">
+      <summary>Wi-Fi networks</summary>
+      <div class="muted gap-above">Up to 5 saved networks. The player joins the strongest one in range.</div>
+      <div id="savedNetworks"></div>
+      <form id="addNetworkForm">
+        <label for="scannedNetworks">Add a network</label>
+        <select id="scannedNetworks"><option value="">Scanning…</option></select>
+        <label for="networkSsid">Name (SSID)</label>
+        <input id="networkSsid" maxlength="32" autocomplete="off" required>
+        <label for="networkPassword">Password</label>
+        <input id="networkPassword" type="password" maxlength="64">
+        <button type="submit" class="wide">Save and connect</button>
+      </form>
+      <button class="danger wide" id="forgetNetworksButton">Forget all networks</button>
+    </details>
+
+    <details id="aboutSection" class="gap-above">
+      <summary>About this player</summary>
+      <div id="playerInfo" class="muted">Loading…</div>
+    </details>
+
+    <details class="gap-above">
+      <summary>Restart / factory reset</summary>
+      <button class="ghost wide" id="restartButton">Restart player</button>
+      <button class="danger wide" id="factoryResetButton">Factory reset</button>
+      <div class="muted gap-above">Factory reset erases all songs, playlists, Wi-Fi networks and settings and brings back the demo songs. The player then opens its setup hotspot, as when it was new.</div>
+    </details>
+  </section>
+</main>
+
+<div id="toast"></div>
+<div id="loadError" class="load-error" hidden>
+  The page did not load completely (weak Wi-Fi?).
+  <button id="loadErrorReload">Reload</button>
+</div>
+
+<!-- Loads the page scripts one after another (settings.js first: the others read SETTINGS).
+     On weak Wi-Fi a file sometimes doesn't arrive, or a browser keeps a broken copy: a failed
+     file is fetched again, bypassing the cache, before the page gives up and asks for a reload.
+     Relative paths: work on the player ("/") and from the local test server alike. -->
+<script>
+(function loadPageScripts() {
+  'use strict';
+  const SCRIPTS = ['settings.js', 'converter.js', 'convert.js', 'app.js'];
+  const TRIES_PER_SCRIPT = 3;
+  const RETRY_DELAY_MS = 700;
+
+  function showLoadError(file) {
+    console.error('page script did not load:', file);
+    document.getElementById('loadError').hidden = false;
+    document.getElementById('loadErrorReload').onclick = () => location.reload();
+  }
+
+  function load(index, attempt) {
+    if (index >= SCRIPTS.length) return;
+    const script = document.createElement('script');
+    // A retry gets a unique URL, so the browser can't hand back a broken cached copy.
+    script.src = SCRIPTS[index] + (attempt > 1 ? '?retry=' + attempt + '-' + Date.now() : '');
+    script.onload = () => load(index + 1, 1);
+    script.onerror = () => {
+      script.remove();
+      if (attempt < TRIES_PER_SCRIPT) setTimeout(() => load(index, attempt + 1), RETRY_DELAY_MS);
+      else showLoadError(SCRIPTS[index]);
+    };
+    document.body.appendChild(script);
+  }
+
+  load(0, 1);
+})();
+</script>
+</body>
+</html>
